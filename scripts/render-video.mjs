@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 
 // Sample the real Three.js scene at deterministic times, independent of machine rendering speed.
-const output = process.env.COURTYARD_ARTIFACTS || '/workspace/artifacts/endless-courtyard-v2';
+const output = process.env.COURTYARD_ARTIFACTS || '/workspace/artifacts/endless-courtyard-v3';
 const fps = Number(process.env.COURTYARD_FPS || 24);
 const width = Number(process.env.COURTYARD_WIDTH || 720);
 const height = Number(process.env.COURTYARD_HEIGHT || 1280);
@@ -21,6 +21,7 @@ page.on('pageerror', error => errors.push(error.message));
 page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
 await page.goto(process.env.COURTYARD_URL || 'http://127.0.0.1:5173');
 await page.waitForSelector('[data-render-state="ready"]');
+await page.waitForSelector('[data-environment-state="ready"], [data-environment-state="fallback"]');
 await page.getByRole('button', { name: '进入纯画面模式', exact: true }).click();
 await page.locator('#exit-cinema').blur();
 await page.evaluate(() => document.body.classList.remove('show-exit'));

@@ -6,7 +6,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { createPaintPass } from './paint-pass';
+import { createParticleGrade } from './particle-grade';
 import { Playback } from '../playback';
 import { createWorld } from './world';
 import { sampleJourney } from './camera-path';
@@ -27,6 +27,7 @@ export class Experience {
   private contextLost = false;
   private needsRender = true;
   private renderedTime = -1;
+  private renderedRevision = -1;
   private assetsReady = false;
 
   constructor(private readonly container: HTMLElement, private readonly onFrame: (time: number, chapter: string) => void) {
@@ -36,7 +37,7 @@ export class Experience {
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = .92;
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = false;
     this.renderer.shadowMap.type = PCFSoftShadowMap;
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.needsUpdate = true;
@@ -48,7 +49,7 @@ export class Experience {
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.world.scene, this.camera));
     this.composer.addPass(new OutputPass());
-    this.grain = createPaintPass();
+    this.grain = createParticleGrade();
     this.composer.addPass(this.grain);
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
@@ -66,6 +67,7 @@ export class Experience {
     const width = this.container.clientWidth, height = this.container.clientHeight;
     if (!width || !height) return;
     this.renderer.setSize(width, height, false);
+    this.world.resize(height * this.renderer.getPixelRatio());
     this.composer.setSize(width, height);
     this.grain.uniforms.resolution.value.set(width * this.renderer.getPixelRatio(), height * this.renderer.getPixelRatio());
     this.camera.aspect = width / height;
@@ -88,7 +90,7 @@ export class Experience {
     this.lastTime = timestamp;
     if (!document.hidden) {
       this.playback.advance(delta);
-      if (!this.needsRender && this.renderedTime === this.playback.time) {
+      if (!this.needsRender && this.renderedTime === this.playback.time && this.renderedRevision === this.world.revision) {
         this.frame = requestAnimationFrame(this.tick);
         return;
       }
@@ -104,7 +106,9 @@ export class Experience {
       this.world.update(this.playback.time);
       this.composer.render();
       if (this.assetsReady) this.container.dataset.renderState = 'ready';
+      this.container.dataset.environmentState = this.world.environmentState;
       this.renderedTime = this.playback.time;
+      this.renderedRevision = this.world.revision;
       this.needsRender = false;
       this.onFrame(this.playback.time, sample.chapter);
     }

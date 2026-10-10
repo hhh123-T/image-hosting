@@ -1,15 +1,15 @@
 import {
-  BackSide, BoxGeometry, BufferGeometry, Color, DirectionalLight, Float32BufferAttribute,
-  Fog, Group, HemisphereLight, IcosahedronGeometry, InstancedMesh, Mesh, MeshStandardMaterial, Points, PointsMaterial,
-  Scene, ShaderMaterial, SphereGeometry,
+  BackSide, BoxGeometry, BufferGeometry, Color,
+  Fog, Group, IcosahedronGeometry, Mesh, MeshStandardMaterial, Points, PointsMaterial,
+  RepeatWrapping, Scene, ShaderMaterial, SphereGeometry, SRGBColorSpace, Texture, TextureLoader,
 } from 'three';
 import { createMaterials, loadPaintAtlas, seededRandom } from './materials';
-import { createWater } from './water';
+import { createParticlePainting } from './particle-paint';
 
 function createSky() {
   return new Mesh(new SphereGeometry(650, 32, 16), new ShaderMaterial({
     side: BackSide, depthWrite: false,
-    uniforms: { paintMap: { value: null }, usePaint: { value: 0 } },
+    uniforms: { paintMap: { value: null }, usePaint: { value: 0 }, environmentMap: { value: null }, useEnvironment: { value: 0 } },
     vertexShader: `
       varying vec3 vPosition;
       void main() {
@@ -20,6 +20,8 @@ function createSky() {
     fragmentShader: `
       uniform sampler2D paintMap;
       uniform float usePaint;
+      uniform sampler2D environmentMap;
+      uniform float useEnvironment;
       varying vec3 vPosition;
       float hash(vec2 p) { vec3 q=fract(vec3(p.xyx)*.1031); q+=dot(q,q.yzx+33.33); return fract((q.x+q.y)*q.z); }
       float noise(vec2 p) {
@@ -29,13 +31,25 @@ function createSky() {
       void main() {
         vec3 dir = normalize(vPosition);
         float height = smoothstep(-.06, .72, dir.y);
-        vec3 color = mix(vec3(.42,.44,.44), vec3(.29,.32,.34), height);
-        vec2 p=vec2(atan(dir.z,dir.x)*8.0,dir.y*19.0);
+        vec3 color = mix(vec3(.44,.47,.48), vec3(.34,.38,.40), height);
+        vec2 p=vec2(dir.x*19.0+dir.z*13.0,dir.y*19.0);
         float clouds=noise(p*vec2(1.0,2.8))*.55+noise(p*vec2(3.0,9.0))*.3+noise(p*vec2(15.0,38.0))*.15;
         color += (clouds - .5) * .15;
+        float ink=smoothstep(.46,.75,noise(p*vec2(.42,.8)+vec2(7.0,1.0)));
+        ink*=smoothstep(-.23,.15,dir.y)*(1.0-smoothstep(.57,.9,dir.y));
+        float chalk=smoothstep(.44,.77,noise(p*vec2(.32,.55)+vec2(19.0,8.0)));
+        color=mix(color,vec3(.63,.65,.64),chalk*.55);
+        color=mix(color,vec3(.055,.075,.09),ink*.80);
         vec2 paintUv=vec2(atan(dir.z,dir.x)/6.283185+.5,acos(clamp(dir.y,-1.0,1.0))/3.141593)*vec2(5.0,3.0);
         vec3 brushed=texture2D(paintMap,paintUv).rgb;
-        color=mix(color,brushed*.55+vec3(.18),usePaint*.38);
+        color=mix(color,color*(brushed*.75+vec3(.63)),usePaint*.42);
+        vec2 panoramaUv=vec2(atan(dir.z,dir.x)/6.283185+.5,.5+asin(clamp(dir.y,-1.0,1.0))/3.141593);
+        vec3 surroundingPaint=texture2D(environmentMap,panoramaUv).rgb;
+        float seam=1.0-smoothstep(0.0,.045,min(panoramaUv.x,1.0-panoramaUv.x));
+        vec3 oppositeEdge=texture2D(environmentMap,vec2(1.0-panoramaUv.x,panoramaUv.y)).rgb;
+        surroundingPaint=mix(surroundingPaint,(surroundingPaint+oppositeEdge)*.5,seam);
+        surroundingPaint*=brushed*.24+vec3(.88);
+        color=mix(color,surroundingPaint,useEnvironment*.96);
         gl_FragColor = vec4(color, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -50,6 +64,11 @@ export function createWorld() {
   scene.fog = new Fog('#a9b0b1', 135, 460);
   const materials = createMaterials();
   let disposed = false;
+  let painting: ReturnType<typeof createParticlePainting> | null = null;
+  let environment: Texture | null = null;
+  let revision = 0;
+  let environmentState: 'loading' | 'ready' | 'fallback' = 'loading';
+  let viewportHeight = 900, lastTime = 0;
   const geometry = new BoxGeometry(1, 1, 1, 4, 10, 2);
   const vertices = geometry.attributes.position;
   for (let i = 0; i < vertices.count; i++) {
@@ -157,94 +176,51 @@ export function createWorld() {
     block(x, height / 2, z, 4 + random() * 12, height, 5 + random() * 15, i % 4 ? materials.stone : materials.dark);
   }
 
-  // Batch identical pigment faces. Source boxes retain their individual bounds
-  // for the collision check, while the renderer draws the batches instead.
+  // Geometry only defines the original motif's placement; visible matter is paint particles.
   scene.updateMatrixWorld(true);
-  const batches = new Map<MeshStandardMaterial, Mesh[]>();
+  const surfaces: Mesh[] = [];
   architecture.traverse(object => {
-    if (!(object instanceof Mesh) || object.geometry !== geometry) return;
-    const material = object.material as MeshStandardMaterial;
-    const list = batches.get(material) || []; list.push(object); batches.set(material, list);
+    if (!(object instanceof Mesh)) return;
+    surfaces.push(object); object.visible = false;
   });
-  for (const [material, meshes] of batches) {
-    const batch = new InstancedMesh(geometry, material, meshes.length);
-    batch.name = 'Painted architecture batch';
-    meshes.forEach((mesh, index) => { batch.setMatrixAt(index, mesh.matrixWorld); mesh.visible = false; });
-    batch.instanceMatrix.needsUpdate = true; batch.computeBoundingSphere();
-    batch.castShadow = true; batch.receiveShadow = true; scene.add(batch);
-  }
   const sky = createSky(); scene.add(sky);
-  scene.add(new HemisphereLight('#e2e5e5', '#737a7d', 1.4));
-  const sunlight = new DirectionalLight('#eee9e0', 1.8);
-  sunlight.position.set(-65, 95, 40);
-  sunlight.target.position.set(0, 0, -55);
-  sunlight.castShadow = true;
-  sunlight.shadow.mapSize.set(1024, 1024);
-  Object.assign(sunlight.shadow.camera, { left: -150, right: 150, top: 130, bottom: -110, near: 1, far: 300 });
-  sunlight.shadow.bias = -0.0004;
-  sunlight.shadow.normalBias = 0.12;
-  scene.add(sunlight, sunlight.target);
-  const fill = new DirectionalLight('#bccad2', .38);
-  fill.position.set(55, 35, -70);
-  scene.add(fill);
-
-  materials.dark.emissive.set('#596267');
-  materials.dark.emissiveIntensity = .24;
-
-  const water = createWater(); scene.add(water.mesh);
+  const panoramaReady = new TextureLoader().loadAsync('/textures/ink-panorama.png').then(texture => {
+    if (disposed) { texture.dispose(); return null; }
+    texture.colorSpace = SRGBColorSpace; texture.wrapS = RepeatWrapping;
+    environment = texture;
+    sky.material.uniforms.environmentMap.value = texture;
+    sky.material.uniforms.useEnvironment.value = 1;
+    environmentState = 'ready'; revision++;
+    return texture;
+  }).catch(() => {
+    if (!disposed) { environmentState = 'fallback'; revision++; }
+    console.warn('Ink panorama unavailable; using procedural washes.'); return null;
+  });
   const ready = loadPaintAtlas(materials, () => disposed).then(atlas => {
     if (disposed) return;
     if (atlas) {
-      water.setPaintMap(atlas);
       sky.material.uniforms.paintMap.value = atlas;
       sky.material.uniforms.usePaint.value = 1;
     }
+    painting = createParticlePainting(surfaces);
+    painting.resize(viewportHeight); painting.update(lastTime);
+    scene.add(painting.group);
+    revision++;
   });
-  const dustGeometry = new BufferGeometry();
-  const positions: number[] = [], seeds: number[] = [];
-  for (let i = 0; i < 650; i++) {
-    positions.push((random() - .5) * 170, random() * 60 + 1, -random() * 210 + 45);
-    seeds.push(random());
-  }
-  dustGeometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
-  dustGeometry.setAttribute('seed', new Float32BufferAttribute(seeds, 1));
-  const dust = new Points(dustGeometry, new ShaderMaterial({
-    transparent: true, depthWrite: false,
-    vertexShader: `attribute float seed; varying float vSeed; varying float vFade;
-      void main() {
-        vSeed=seed; vec4 p=modelViewMatrix*vec4(position,1.0);
-        vFade=1.0-smoothstep(35.0,150.0,-p.z);
-        gl_PointSize=clamp((.25+seed*.65)*180.0/-p.z,.6,3.0);
-        gl_Position=projectionMatrix*p;
-      }`,
-    fragmentShader: `varying float vSeed; varying float vFade;
-      void main() {
-        vec2 p=gl_PointCoord-.5;
-        float d=length(p*vec2(1.0,1.6));
-        float alpha=(1.0-smoothstep(.12,.5,d))*.22*vFade;
-        gl_FragColor=vec4(mix(vec3(.23,.26,.28),vec3(.72,.74,.71),vSeed),alpha);
-        #include <colorspace_fragment>
-      }`,
-  }));
-  scene.add(dust);
 
   return {
-    scene, ready,
+    scene, ready, panoramaReady,
+    get revision() { return revision; },
+    get environmentState() { return environmentState; },
     update(time: number) {
-      // All movement is periodic with the camera loop, including the ripples.
-      const phase = time / 48 * Math.PI * 2;
-      // Architecture stays fixed like dry paint; only the wash and flecks drift.
-      dust.position.x = Math.sin(phase) * 1.4;
-      dust.position.y = Math.cos(phase) * .45;
-      water.update(phase);
+      lastTime = time; painting?.update(time);
     },
+    resize(height: number) { viewportHeight = height; painting?.resize(height); },
     dispose() {
       disposed = true;
-      water.mesh.dispose();
       const geometries = new Set<BufferGeometry>();
-      const mats = new Set<MeshStandardMaterial | ShaderMaterial | PointsMaterial>();
+      const mats = new Set<MeshStandardMaterial | ShaderMaterial | PointsMaterial>(Object.values(materials));
       scene.traverse(object => {
-        if (object instanceof InstancedMesh) object.dispose();
         if (object instanceof Mesh || object instanceof Points) {
           geometries.add(object.geometry);
           const list = Array.isArray(object.material) ? object.material : [object.material];
@@ -253,8 +229,8 @@ export function createWorld() {
       });
       for (const geo of geometries) geo.dispose();
       for (const texture of new Set(Object.values(materials).map(material => material.map))) texture?.dispose();
+      environment?.dispose();
       for (const mat of mats) mat.dispose();
-      sunlight.shadow.dispose();
     },
   };
 }

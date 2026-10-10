@@ -75,8 +75,8 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <div class="dialog-head"><span class="eyebrow">NOTES ON THE WORLD / 001</span><button id="close-about" class="icon-button" aria-label="关闭作品介绍">${icon('close')}</button></div>
     <h2 id="about-title">从画布，<br>走向无垠。</h2>
     <p class="dialog-intro">有些画里的空白，藏着一整个世界。</p>
-    <p>原画中灰蓝的横向笔触成为悬浮平台，炭黑的竖向体块成为巨柱，石白的墙面向远方延伸。赭红的切面引导镜头穿过门洞，进入画框之外的庭院。</p>
-    <div class="material-notes"><div><i style="--swatch:#909b9b"></i><span>灰蓝</span><small>平台与水面</small></div><div><i style="--swatch:#dcd7c9"></i><span>粉白</span><small>墙体与厚涂</small></div><div><i style="--swatch:#353d41"></i><span>炭黑</span><small>巨柱与边界</small></div><div><i style="--swatch:#ac6550"></i><span>赭红</span><small>门洞与切面</small></div></div>
+    <p>灰蓝、粉白、炭黑与赭红化成有厚度的颜料粒子，聚拢成画境，再沿着风慢慢散开。墨尘、灰蓝晕染和大片墨团围绕镜头铺展，穿行、抬升和环绕都在同一幅无边界的画里。</p>
+    <div class="material-notes"><div><i style="--swatch:#909b9b"></i><span>灰蓝</span><small>水上点阵与晕染</small></div><div><i style="--swatch:#dcd7c9"></i><span>粉白</span><small>颜料点群与雾层</small></div><div><i style="--swatch:#353d41"></i><span>炭黑</span><small>墨团与卷动轨迹</small></div><div><i style="--swatch:#ac6550"></i><span>赭红</span><small>色流与画境深处</small></div></div>
     <p>这是一件由真实三维几何与绘画肌理构成的空间习作。48 秒连续运镜，从水面漫游到云上俯瞰；也可以暂停，让时间停在你喜欢的地方。</p>
     <div class="dialog-foot"><span>STILL · A WORLD WITHIN ART</span><button id="return-world" class="text-button">回到画境 ${icon('arrow')}</button></div>
   </dialog>
